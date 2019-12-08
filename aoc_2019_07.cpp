@@ -212,8 +212,8 @@ void Solve1(const Input& initialInput)
             maxThrust = outputValue;
         }
 
-        std::next_permutation(phases.begin(), phases.end());
-    } while (!std::is_sorted(phases.begin(), phases.end()));
+        
+    } while (std::next_permutation(phases.begin(), phases.end()));
 
     std::cout << maxThrust << std::endl;
 }
@@ -272,9 +272,7 @@ void Solve2(const Input& initialInput)
                 }
             }
         } while (shouldContinueLooping);
-        
-        std::next_permutation(phases.begin(), phases.end());
-    } while (!std::is_sorted(phases.begin(), phases.end()));
+    } while (std::next_permutation(phases.begin(), phases.end()));
 
     std::cout << maxThrust << std::endl;
 }
