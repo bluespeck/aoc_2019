@@ -36,6 +36,18 @@ Input ReadInput()
 struct Point
 {
     int64_t x, y;
+    friend bool operator==(const Point& a, const Point& b)
+    {
+        return a.x == b.x && a.y == b.y;
+    }
+    friend bool operator<(const Point& a, const Point& b)
+    {
+        return a.x < b.x || a.x == b.x && a.y < b.y;
+    }
+    friend Point operator+(const Point& a, const Point& b)
+    {
+        return { a.x + b.x, a.y + b.y };
+    }
 };
 
 using Grid = std::vector<std::vector<int64_t>>;
@@ -45,8 +57,8 @@ using KeyDependencies = std::array<std::string, 128>;
 using KeyPairDependencies = std::array<KeyDependencies, 128>;
 
 using KeyPairDists = std::array<std::array<int64_t, 128>, 128>;
-KeyPairDists keyPairDists;
-
+using KeyPairKeysOnPath = std::array<std::array<std::string, 128>, 128>;
+//KeyPairDists keyPairDists;
 
 void ExploreNeighbors(const Input& input, Grid& grid, const std::string& collectedKeys, Point pos, int64_t pathLength);
 
@@ -217,8 +229,8 @@ void FloodFill(Input& input, Point pos)
             count++;
         if (count >= 3)
         {
-            if (input[i][j] >= 'A' && input[i][j] <= 'Z')
-                std::cout << input[i][j] << std::endl;
+            //if (input[i][j] >= 'A' && input[i][j] <= 'Z')
+            //    std::cout << input[i][j] << std::endl;
 
             input[i][j] = '#';
             FloodFill(input, { j - 1, i });
@@ -273,7 +285,7 @@ void ExploreNoDoors(const Input& input, Grid& grid, Point pos, int64_t pathLengt
     ExploreNoDoors(input, grid, { pos.x, pos.y - 1 }, pathLength + 1);
 }
 
-KeyPairDependencies FindKeyDependencies(const Input& input, Grid& grid, Point playerPos)
+KeyPairDependencies FindKeyDependencies(const Input& input, Grid& grid, Point playerPos, KeyPairDists& keyPairDists, KeyPairKeysOnPath& keyPairKeysOnPath)
 {
     KeyPairDependencies keyDeps;
 
@@ -306,12 +318,20 @@ KeyPairDependencies FindKeyDependencies(const Input& input, Grid& grid, Point pl
 
             auto length = grid[endPos.y][endPos.x];
             keyPairDists[startKeyChar][endKeyChar] = length - 1;
+            keyPairKeysOnPath[startKeyChar][endKeyChar] = {};
             auto& deps = keyDeps[startKeyChar][endKeyChar];
+            auto& keysOnPath = keyPairKeysOnPath[startKeyChar][endKeyChar];
+            bool unreachable = false;
             while (!(endPos.x == startPos.x && endPos.y == startPos.y))
             {
-                if (input[endPos.y][endPos.x] >= 'A' && input[endPos.y][endPos.x] <= 'Z')
+                auto ch = input[endPos.y][endPos.x];
+                if (ch >= 'A' && ch <= 'Z')
                 {
-                    deps.push_back(input[endPos.y][endPos.x] + 0x20);
+                    deps.push_back(ch + 0x20);
+                }
+                else if (ch >= 'a' && ch <= 'z')
+                {
+                    keysOnPath.push_back(ch);
                 }
                 length--;
                 if (grid[endPos.y - 1][endPos.x] == length)
@@ -329,9 +349,22 @@ KeyPairDependencies FindKeyDependencies(const Input& input, Grid& grid, Point pl
                     endPos.x++;
                 }
                 else
-                    assert(false);
+                {
+                    unreachable = true;
+                    break;
+                }
             }
-            std::reverse(deps.begin(), deps.end());
+            if (unreachable)
+            {
+                keyPairDists[startKeyChar][endKeyChar] = std::numeric_limits<int64_t>::max();
+                deps.push_back('+'); //a dependency that cannot be satisfied
+                continue;
+            }
+            else
+            {
+                std::reverse(deps.begin(), deps.end());
+                std::reverse(keysOnPath.begin(), keysOnPath.end());
+            }
         }
     }
     return keyDeps;
@@ -364,12 +397,86 @@ bool PathIsValid(std::string path, const KeyPairDependencies& keyPairDependencie
     return true;
 }
 
-int64_t GetPathLength(std::string path)
+int64_t GetPathLength(std::string path, const KeyPairDists& keyPairDists)
 {
     int64_t length = keyPairDists[0][path[0]];
     for (int i = 1; i < path.size(); i++)
         length += keyPairDists[path[i - 1]][path[i]];
     return length;
+}
+
+void Solve1_1(const Input& initialInput)
+{
+    auto input = initialInput;
+
+    PrepareInput(input);
+
+    auto startingPos = FindStartingPos(input);
+    allKeys = FindKeys(input);
+    Grid grid(input.size());
+    for (auto& e : grid)
+    {
+        e.resize(input[0].size());
+    }
+    KeyPairDists keyPairDists;
+    KeyPairKeysOnPath keyPairKeysOnPath;
+    auto keyDependencies = FindKeyDependencies(input, grid, startingPos, keyPairDists, keyPairKeysOnPath);
+
+    auto minPathLength = std::numeric_limits<int64_t>::max();
+    std::string path;
+    path.resize('z' - 'a' + 1);
+    std::iota(path.begin(), path.end(), 'a');
+
+    while (std::next_permutation(path.begin(), path.end()))
+    {
+        if (PathIsValid(path, keyDependencies))
+        {
+            auto pathLength = GetPathLength(path, keyPairDists);
+            if (pathLength < minPathLength)
+            {
+                minPathLength = pathLength;
+                std::cout << path << "\n";
+            }
+        }
+        std::cout << path << "\n";
+    }
+}
+
+void Solve1_2(const Input& initialInput)
+{
+    auto input = initialInput;
+
+    PrepareInput(input);
+    for (int i = 0; i < input.size(); i++)
+    {
+        std::cout << input[i] << std::endl;
+    }
+
+    std::string collectedKeys;
+    std::string deadendKeys = "cvnahztk";
+
+    auto startingPos = FindStartingPos(input);
+    allKeys = FindKeys(input);
+    Grid grid(input.size());
+    for (auto& e : grid)
+    {
+        e.resize(input[0].size());
+    }
+
+    KeyPairDists keyPairDists;
+    KeyPairKeysOnPath keyPairKeysOnPath;
+    auto keyDependencies = FindKeyDependencies(input, grid, startingPos, keyPairDists, keyPairKeysOnPath);
+    
+    // for (auto ch = 'a'; ch <= 'z'; ch++)
+    // {
+    //     for (auto ch1 = 'a'; ch1 <= 'z'; ch1++)
+    //     {
+    //         std::cout << ch << ch1 << " dist: " << keyPairDists[ch][ch1] << "   depends on " << keyDependencies[ch][ch1] << std::endl;
+    //     }
+    // }
+    BackTrackingToRuleThemAll(input, grid, collectedKeys, startingPos);
+
+    std::cout << minPath;
 }
 
 void DijkstraLike(const Input& input, Grid& grid, Point pos)
@@ -378,8 +485,9 @@ void DijkstraLike(const Input& input, Grid& grid, Point pos)
     using KeychainDistances = std::array<PathLengths, 128>;
 
     KeychainDistances dists;
-
-    auto keyDependencies = FindKeyDependencies(input, grid, pos);
+    KeyPairDists keyPairDists;
+    KeyPairKeysOnPath keyPairKeysOnPath;
+    auto keyDependencies = FindKeyDependencies(input, grid, pos, keyPairDists, keyPairKeysOnPath);
 
     struct KeyAndChain
     {
@@ -434,89 +542,21 @@ void DijkstraLike(const Input& input, Grid& grid, Point pos)
             else
             {
                 newKeychainMap[newKeyChain] = dists[key][chain] + keyPairDists[key][ch];
-                if (newKeyChain.size() == allKeys.size())
-                {
-                    if (newKeychainMap[newKeyChain] < minLength)
-                    {
-                        minLength = newKeychainMap[newKeyChain];
-                        std::cout << minLength << std::endl;
-                    }
-                }
-                toVisit.push({ ch, newKeyChain });
             }
-        }
-    }
-}
 
-void Solve1_1(const Input& initialInput)
-{
-    auto input = initialInput;
-
-    PrepareInput(input);
-
-    auto startingPos = FindStartingPos(input);
-    allKeys = FindKeys(input);
-    Grid grid(input.size());
-    for (auto& e : grid)
-    {
-        e.resize(input[0].size());
-    }
-
-    auto keyDependencies = FindKeyDependencies(input, grid, startingPos);
-
-    auto minPathLength = std::numeric_limits<int64_t>::max();
-    std::string path;
-    path.resize('z' - 'a' + 1);
-    std::iota(path.begin(), path.end(), 'a');
-
-    while (std::next_permutation(path.begin(), path.end()))
-    {
-        if (PathIsValid(path, keyDependencies))
-        {
-            auto pathLength = GetPathLength(path);
-            if (pathLength < minPathLength)
+            if (newKeyChain.size() == allKeys.size())
             {
-                minPathLength = pathLength;
-                std::cout << path << "\n";
+                if (newKeychainMap[newKeyChain] < minLength)
+                {
+                    minLength = newKeychainMap[newKeyChain];
+                    std::cout << minLength << std::endl;
+                }
+                continue;
             }
+
+            toVisit.push({ ch, newKeyChain });
         }
-        std::cout << path << "\n";
     }
-}
-
-void Solve1_2(const Input& initialInput)
-{
-    auto input = initialInput;
-
-    PrepareInput(input);
-    for (int i = 0; i < input.size(); i++)
-    {
-        std::cout << input[i] << std::endl;
-    }
-
-    std::string collectedKeys;
-    std::string deadendKeys = "cvnahztk";
-
-    auto startingPos = FindStartingPos(input);
-    allKeys = FindKeys(input);
-    Grid grid(input.size());
-    for (auto& e : grid)
-    {
-        e.resize(input[0].size());
-    }
-
-    auto keyDependencies = FindKeyDependencies(input, grid, startingPos);
-
-    // for (auto ch = 'a'; ch <= 'z'; ch++)
-    // {
-    //     for (auto ch1 = 'a'; ch1 <= 'z'; ch1++)
-    //     {
-    //         std::cout << ch << ch1 << " dist: " << keyPairDists[ch][ch1] << "   depends on " << keyDependencies[ch][ch1] << std::endl;
-    //     }
-    // }
-    BackTrackingToRuleThemAll(input, grid, collectedKeys, startingPos);
-
-    std::cout << minPath;
 }
 
 void Solve1(const Input& initialInput)
@@ -539,10 +579,304 @@ void Solve1(const Input& initialInput)
     DijkstraLike(input, grid, startingPos);
 }
 
+void FillDistsWithMax(KeyPairDists& dists)
+{
+    for (auto& e : dists)
+    {
+        e.fill(std::numeric_limits<KeyPairDists::value_type::value_type>::max());
+    }
+}
+
+void DijkstraLike2(const Input& input, Grid& grid, const std::vector<Point>& positions)
+{
+    using PathLengths = std::map<std::string, int64_t>;
+    using KeychainDistances = std::array<PathLengths, 128>;
+
+    KeychainDistances dists;
+    std::array<KeyPairDependencies, 4> keyDependencies;
+    std::array<KeyPairDists, 4> keyPairDists;
+    std::array<std::string, 4> allPlayerKeys;
+    std::array<KeyPairKeysOnPath, 4> keysOnPath;
+    for (int i = 0; i < 4; i++)
+    {
+        FillDistsWithMax(keyPairDists[i]);
+        keyDependencies[i] = FindKeyDependencies(input, grid, positions[i], keyPairDists[i], keysOnPath[i]);
+        for (auto e : allKeys)
+        {
+            char keyChar = input[e.y][e.x];
+            if (keyPairDists[i][0][keyChar] < 1'000'000)
+                allPlayerKeys[i].push_back(keyChar);
+        }
+    }
+
+    struct KeyAndChain
+    {
+        std::array<std::string, 4> keys;
+        std::array<int64_t, 4> robotDists;
+        int64_t robotIndex;
+        std::string chain;
+        
+    };
+    std::queue<KeyAndChain> toVisit;
+    toVisit.push({ {std::string{'\0'}, {'\0'}, {'\0'}, {'\0'}}, {0,0,0,0}, 0, "" });
+    toVisit.push({ {std::string{'\0'}, {'\0'}, {'\0'}, {'\0'}}, {0,0,0,0}, 1, "" });
+    toVisit.push({ {std::string{'\0'}, {'\0'}, {'\0'}, {'\0'}}, {0,0,0,0}, 2, "" });
+    toVisit.push({ {std::string{'\0'}, {'\0'}, {'\0'}, {'\0'}}, {0,0,0,0}, 3, "" });
+    dists[0][""] = 0;
+    
+    int64_t minLength = std::numeric_limits<int64_t>::max();
+
+    while (!toVisit.empty())
+    {
+        auto keys = std::move(toVisit.front().keys);
+        auto robotDists = std::move(toVisit.front().robotDists);
+        auto robotIndex = toVisit.front().robotIndex;
+        auto chain = std::move(toVisit.front().chain);
+        toVisit.pop();
+
+        for (int i = 0; i < 4; i++)
+        {   
+            for (auto ch : allPlayerKeys[i])
+            {
+                if (ch == keys[i].back())
+                    continue;
+
+                if (chain.find(ch) != chain.npos)
+                    continue;
+
+                bool dependenciesMet = true;
+
+                for (auto e : keyDependencies[i][keys[i].back()][ch])
+                {
+                    if (chain.find(e) == chain.npos)
+                    {
+                        dependenciesMet = false;
+                        break;
+                    }
+                }
+
+                if (!dependenciesMet)
+                    continue;
+
+                auto newKeyChain = chain;
+                //std::cout << keys[i].back() << "<" <<  keysOnPath[i][keys[i].back()][ch] << ">" << ch << std::endl;
+                for (auto e : keysOnPath[i][keys[i].back()][ch])
+                {
+                    if (chain.find(e) == chain.npos)
+                    {
+                        newKeyChain.push_back(e);
+                    }
+                }
+
+                std::sort(newKeyChain.begin(), newKeyChain.end());
+
+                auto& newKeychainDists = dists[ch];
+
+                if (newKeychainDists.find(newKeyChain) != newKeychainDists.end())
+                {
+                    auto newDist = dists[keys[robotIndex].back()].at(chain) + keyPairDists[i][keys[i].back()][ch];
+                    if (newKeychainDists.at(newKeyChain) > newDist)
+                    {   
+                        newKeychainDists[newKeyChain] = newDist;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    auto newDist = dists[keys[robotIndex].back()].at(chain) + keyPairDists[i][keys[i].back()][ch];
+                    newKeychainDists[newKeyChain] = newDist;
+                }
+
+                if (newKeyChain.size() == allKeys.size())
+                {
+                    if (newKeychainDists[newKeyChain] < minLength)
+                    {
+                        minLength = newKeychainDists[newKeyChain];
+                        std::cout << minLength << std::endl;
+                        for (int j = 0; j < 4; j++)
+                        {
+                            std::cout << "[" << j << "] " << keys[j];
+                            if (i == j)
+                            {
+                                std::cout << ch;
+                                //std::cout << " " << robotDists[j] + keyPairDists[j][keys[j].back()][ch];
+                            }
+                            else
+                            {
+                                //std::cout << " " << robotDists[j];
+                            }
+                            std::cout << std::endl;
+                        }
+                    }
+                    continue;
+                }
+
+                auto newKeys = keys;
+                for (auto e : keysOnPath[i][keys[i].back()][ch])
+                {
+                    if (keys[i].find(e) == keys[i].npos)
+                    {
+                        newKeys[i].push_back(e);
+                    }
+                }
+                auto newRobotDists = robotDists;
+                newRobotDists[i] = robotDists[i] + keyPairDists[i][keys[i].back()][ch];
+                toVisit.push({ newKeys, newRobotDists, i, newKeyChain });
+            }
+        }
+    }
+}
+
+bool isDoor(char ch)
+{
+    return ch >= 'A' && ch <= 'Z';
+}
+
+bool isKey(char ch)
+{
+    return ch >= 'a' && ch <= 'z';
+}
+
+void DijkstraLike3(const Input& input, Grid& grid, const std::vector<Point>& positions)
+{
+    std::vector<std::vector<std::unordered_map<std::string, int64_t>>> dists;
+    dists.resize(input.size());
+    for (auto& e : dists)
+    {
+        e.resize(input[0].size());
+    }
+
+    std::array<Point, 4> deltas = {
+        Point{ -1,  0},
+        {  0,  -1},
+        {  1,  0},
+        { 0,   1}
+    };
+
+    struct CellInfo
+    {
+        std::array<Point, 4> robotPositions;
+        int64_t robotIndex;
+        std::string keyChain;
+    };
+    std::queue<CellInfo> toVisit;
+
+    {
+        std::array<Point, 4> robotPositions;
+        std::copy(positions.begin(), positions.end(), robotPositions.begin());
+
+        toVisit.push({ robotPositions, 0, "" });
+        toVisit.push({ robotPositions, 1, "" });
+        toVisit.push({ robotPositions, 2, "" });
+        toVisit.push({ robotPositions, 3, "" });
+    }
+
+    int64_t minLength = std::numeric_limits<int64_t>::max();
+
+    while (!toVisit.empty())
+    {
+        auto robotPositions = std::move(toVisit.front().robotPositions);
+        auto robotIndex = toVisit.front().robotIndex;
+        auto chain = std::move(toVisit.front().keyChain);
+        toVisit.pop();
+
+        for (int i = 0; i < 4; i++)
+        {
+            auto& cellDist = dists[robotPositions[robotIndex].y][robotPositions[robotIndex].x][chain];
+
+            for (const auto& delta : deltas)
+            {
+                auto newPositions = robotPositions;
+                newPositions[i] = newPositions[i] + delta;
+                auto newChain = chain;
+                auto ch = input[newPositions[i].y][newPositions[i].x];
+                if (isDoor(ch))
+                {
+                    if (chain.find(ch + 0x20) == chain.npos)
+                        continue;
+                }
+                else if (isKey(ch))
+                {
+                    if (chain.find(ch) == chain.npos)
+                    {
+                        newChain.push_back(ch);
+                        std::sort(newChain.begin(), newChain.end());
+                    }
+                }
+                else if (ch == '#')
+                {
+                    continue;
+                }
+
+                auto& newCellDist = dists[newPositions[i].y][newPositions[i].x][newChain];
+                if (newCellDist == 0 || newCellDist > cellDist + 1)
+                {
+                    newCellDist = cellDist + 1;
+                    if (newChain.size() == allKeys.size() && newCellDist < minLength)
+                    {
+                        minLength = newCellDist;
+                    }
+
+                    toVisit.push({ newPositions, i, newChain });
+                }
+            }
+        }
+    }
+
+    std::cout << minLength << std::endl;
+}
+
+void Solve2(const Input& initialInput)
+{
+    auto input = initialInput;
+
+    auto startingPos = FindStartingPos(input);
+
+    std::vector<Point> startingPositions;
+
+    input[startingPos.y - 1][startingPos.x - 1] = '@';
+    startingPositions.push_back({ startingPos.x - 1, startingPos.y - 1 });
+
+    input[startingPos.y - 1][startingPos.x + 1] = '@';
+    startingPositions.push_back({ startingPos.x - 1, startingPos.y + 1 });
+
+    input[startingPos.y + 1][startingPos.x - 1] = '@';
+    startingPositions.push_back({ startingPos.x + 1, startingPos.y - 1 });
+
+    input[startingPos.y + 1][startingPos.x + 1] = '@';
+    startingPositions.push_back({ startingPos.x + 1, startingPos.y + 1 });
+
+    input[startingPos.y - 1][startingPos.x] = '#';
+    input[startingPos.y + 1][startingPos.x] = '#';
+    input[startingPos.y][startingPos.x - 1] = '#';
+    input[startingPos.y][startingPos.x + 1] = '#';
+    input[startingPos.y][startingPos.x] = '#';
+
+    PrepareInput(input);
+
+    //for (int i = 0; i < input.size(); i++)
+    //{
+    //    std::cout << input[i] << std::endl;
+    //}
+
+    allKeys = FindKeys(input);
+    Grid grid(input.size());
+    for (auto& e : grid)
+    {
+        e.resize(input[0].size());
+    }
+    DijkstraLike3(input, grid, startingPositions);
+}
+
 int main()
 {
     Input input = ReadInput();
 
     Solve1(input);
+    Solve2(input);
+    
     return 0;
 }
